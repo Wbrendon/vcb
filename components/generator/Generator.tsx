@@ -8,23 +8,11 @@ const DEFAULT_PROMPT_JSON = {
   prompt_template: "A single {{character_description}} in a perfect 120-degree isometric view. The character is drawn in a refined, clean blue (#3C5BFF) outline vector style with accurate human proportions and subtle, believable posture. The figure should include historically or thematically appropriate clothing and props. The illustration must use smooth monochrome blue lines only, with no gradients, no shading, and absolutely no textures or noise. Background is pure white. The composition must be simple and centered, suitable for direct vector conversion (SVG) without cleanup.",
   style: {
     perspective: "Perfect 120-degree isometric",
-    linework: {
-      type: "Monochrome blue outline",
-      stroke_weight: "Uniform",
-      detail_level: "Minimal but expressive"
-    },
-    color: {
-      primary: "Monochrome blue (#3C5BFF)",
-      accents: "Optional, 1 color max (only if historically necessary)"
-    },
-    background: "Pure white",
-    texture: "None",
-    shading: "None",
-    lighting: "None",
-    noise: "None",
+    linework: { type: "Monochrome blue outline", stroke_weight: "Uniform", detail_level: "Minimal but expressive" },
+    color: { primary: "Monochrome blue (#3C5BFF)", accents: "Optional, 1 color max (only if historically necessary)" },
+    background: "Pure white", texture: "None", shading: "None", lighting: "None", noise: "None",
     anatomy: "Proportional human body with realistic stance and limb ratio",
-    expression: "Neutral or subtle emotion",
-    vector_ready: true
+    expression: "Neutral or subtle emotion", vector_ready: true
   },
   composition: {
     subject_focus: "One centered character",
@@ -36,8 +24,57 @@ const DEFAULT_PROMPT_JSON = {
   instructions_for_generation: "Never generate multiple characters. Always use single-subject, anatomically-correct human figure in isometric projection. Do not exaggerate features. No cartoonish effects. Prioritize geometry, balance, and vector cleanness."
 }
 
+const MODEL_OPTIONS = [
+  { value: 'gpt-image-1', label: 'GPT Image 1', desc: '~$0.17/img — máxima qualidade' },
+  { value: 'dall-e-3',    label: 'DALL-E 3',    desc: '~$0.04/img — ótima qualidade' },
+  { value: 'dall-e-2',    label: 'DALL-E 2',    desc: '~$0.02/img — rápido e barato' },
+]
+
+const QUALITY_OPTIONS: Record<string, { value: string; label: string; desc: string }[]> = {
+  'gpt-image-1': [
+    { value: 'high',   label: 'Alta',  desc: '~$0.17' },
+    { value: 'medium', label: 'Média', desc: '~$0.07' },
+    { value: 'low',    label: 'Baixa', desc: '~$0.04' },
+  ],
+  'dall-e-3': [
+    { value: 'hd',       label: 'HD',      desc: '~$0.08' },
+    { value: 'standard', label: 'Padrão',  desc: '~$0.04' },
+  ],
+  'dall-e-2': [
+    { value: 'standard', label: 'Padrão', desc: '~$0.02' },
+  ],
+}
+
+const SIZE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  'gpt-image-1': [
+    { value: '1024x1024', label: '1024×1024' },
+    { value: '1536x1024', label: '1536×1024' },
+    { value: '1024x1536', label: '1024×1536' },
+  ],
+  'dall-e-3': [
+    { value: '1024x1024', label: '1024×1024' },
+    { value: '1792x1024', label: '1792×1024' },
+    { value: '1024x1792', label: '1024×1792' },
+  ],
+  'dall-e-2': [
+    { value: '1024x1024', label: '1024×1024' },
+    { value: '512x512',   label: '512×512' },
+    { value: '256x256',   label: '256×256' },
+  ],
+}
+
 function buildFinalPrompt(promptJson: typeof DEFAULT_PROMPT_JSON, characterDescription: string): string {
   return promptJson.prompt_template.replace('{{character_description}}', characterDescription)
+}
+
+function estimateCost(model: string, quality: string): string {
+  if (model === 'gpt-image-1') {
+    if (quality === 'high') return '$0.17'
+    if (quality === 'medium') return '$0.07'
+    return '$0.04'
+  }
+  if (model === 'dall-e-3') return quality === 'hd' ? '$0.08' : '$0.04'
+  return '$0.02'
 }
 
 export default function Generator() {
@@ -53,21 +90,33 @@ export default function Generator() {
   const [apiInput, setApiInput] = useState('')
   const [apiSaved, setApiSaved] = useState(false)
 
-  // Modal Prompt JSON (editável)
+  // Modal Prompt JSON
   const [showPromptModal, setShowPromptModal] = useState(false)
   const [promptJsonText, setPromptJsonText] = useState(JSON.stringify(DEFAULT_PROMPT_JSON, null, 2))
   const [promptJsonError, setPromptJsonError] = useState<string | null>(null)
   const [promptJsonSaved, setPromptJsonSaved] = useState(false)
   const [activePromptJson, setActivePromptJson] = useState(DEFAULT_PROMPT_JSON)
 
+  // Modal Configurações de geração
+  const [showConfigModal, setShowConfigModal] = useState(false)
+  const [model, setModel] = useState('dall-e-3')
+  const [quality, setQuality] = useState('standard')
+  const [size, setSize] = useState('1024x1024')
+
   const quickPrompts = [
-    'warrior holding a sword',
-    'scientist reading a scroll',
-    'explorer with a backpack',
-    'merchant with a scale',
-    'engineer with blueprints',
-    'doctor with a stethoscope',
+    'warrior holding a sword', 'scientist reading a scroll',
+    'explorer with a backpack', 'merchant with a scale',
+    'engineer with blueprints', 'doctor with a stethoscope',
   ]
+
+  function handleModelChange(newModel: string) {
+    setModel(newModel)
+    // reset quality e size para defaults do novo modelo
+    const quals = QUALITY_OPTIONS[newModel]
+    const sizes = SIZE_OPTIONS[newModel]
+    setQuality(quals[quals.length - 1].value) // mais barato como default
+    setSize(sizes[0].value)
+  }
 
   function handleSaveKey() {
     if (!apiInput.trim()) return
@@ -80,7 +129,7 @@ export default function Generator() {
   function handleSavePromptJson() {
     try {
       const parsed = JSON.parse(promptJsonText)
-      if (!parsed.prompt_template || !parsed.prompt_template.includes('{{character_description}}')) {
+      if (!parsed.prompt_template?.includes('{{character_description}}')) {
         setPromptJsonError('O prompt_template precisa conter {{character_description}}')
         return
       }
@@ -93,11 +142,6 @@ export default function Generator() {
     }
   }
 
-  function handleResetPromptJson() {
-    setPromptJsonText(JSON.stringify(DEFAULT_PROMPT_JSON, null, 2))
-    setPromptJsonError(null)
-  }
-
   async function handleGenerate() {
     if (!characterDescription.trim() || !hasKey) return
     setLoading(true)
@@ -107,7 +151,7 @@ export default function Generator() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-openai-key': apiKey },
-        body: JSON.stringify({ prompt: finalPrompt, characterDescription }),
+        body: JSON.stringify({ prompt: finalPrompt, characterDescription, model, quality, size }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erro na geração')
@@ -129,9 +173,8 @@ export default function Generator() {
     a.click()
   }
 
-  const previewPrompt = characterDescription.trim()
-    ? buildFinalPrompt(activePromptJson, characterDescription)
-    : buildFinalPrompt(activePromptJson, '{{character_description}}')
+  const previewPrompt = buildFinalPrompt(activePromptJson, characterDescription || '{{character_description}}')
+  const currentCost = estimateCost(model, quality)
 
   return (
     <div className="min-h-screen bg-white">
@@ -162,14 +205,12 @@ export default function Generator() {
                 {apiSaved ? 'Salvo!' : 'Salvar chave'}
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-4 leading-relaxed">
-              Salva em <code className="bg-gray-100 px-1 rounded">sessionStorage</code> — some ao fechar a aba.
-            </p>
+            <p className="text-xs text-gray-400 mt-4">Salva em <code className="bg-gray-100 px-1 rounded">sessionStorage</code> — some ao fechar a aba.</p>
           </div>
         </div>
       )}
 
-      {/* Modal Prompt JSON editável */}
+      {/* Modal Prompt JSON */}
       {showPromptModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={(e) => { if (e.target === e.currentTarget) setShowPromptModal(false) }}>
@@ -177,38 +218,97 @@ export default function Generator() {
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
               <div>
                 <h2 className="text-base font-semibold text-gray-900">Prompt de geração</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Edite o JSON diretamente. Use <code className="bg-gray-100 px-1 rounded">{"{{character_description}}"}</code> no prompt_template.</p>
+                <p className="text-xs text-gray-400 mt-0.5">Edite o JSON. Use <code className="bg-gray-100 px-1 rounded">{"{{character_description}}"}</code> no prompt_template.</p>
               </div>
               <button onClick={() => setShowPromptModal(false)} className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 text-lg ml-4 shrink-0">×</button>
             </div>
-
             <div className="flex-1 overflow-auto px-6 py-4">
-              <textarea
-                value={promptJsonText}
-                onChange={(e) => { setPromptJsonText(e.target.value); setPromptJsonError(null) }}
-                className="w-full h-80 font-mono text-xs border border-gray-200 rounded-xl p-4 resize-none focus:outline-none focus:border-blue-400 bg-gray-50 text-gray-800 leading-relaxed"
-                spellCheck={false}
-              />
-              {promptJsonError && (
-                <p className="text-xs text-red-600 mt-2">{promptJsonError}</p>
-              )}
-
+              <textarea value={promptJsonText} onChange={(e) => { setPromptJsonText(e.target.value); setPromptJsonError(null) }}
+                className="w-full h-72 font-mono text-xs border border-gray-200 rounded-xl p-4 resize-none focus:outline-none focus:border-blue-400 bg-gray-50 text-gray-800 leading-relaxed"
+                spellCheck={false} />
+              {promptJsonError && <p className="text-xs text-red-600 mt-2">{promptJsonError}</p>}
               <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-xl">
                 <p className="text-xs font-medium text-blue-700 mb-1">Preview do prompt final</p>
                 <p className="text-xs text-blue-600 font-mono leading-relaxed break-words">{previewPrompt}</p>
               </div>
             </div>
-
             <div className="flex gap-2 px-6 pb-6 pt-4 border-t border-gray-100">
-              <button onClick={handleResetPromptJson}
+              <button onClick={() => { setPromptJsonText(JSON.stringify(DEFAULT_PROMPT_JSON, null, 2)); setPromptJsonError(null) }}
                 className="px-4 py-2.5 text-sm border border-gray-200 rounded-lg text-gray-500 hover:border-gray-400 transition-all">
-                Resetar padrão
+                Resetar
               </button>
               <button onClick={handleSavePromptJson}
                 className="flex-1 bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-all">
                 {promptJsonSaved ? 'Salvo!' : 'Aplicar'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Configurações de geração */}
+      {showConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowConfigModal(false) }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Configurações de geração</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Custo estimado por imagem: <span className="font-semibold text-gray-700">{currentCost}</span></p>
+              </div>
+              <button onClick={() => setShowConfigModal(false)} className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 text-lg">×</button>
+            </div>
+
+            {/* Modelo */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Modelo</p>
+              <div className="flex flex-col gap-2">
+                {MODEL_OPTIONS.map((m) => (
+                  <button key={m.value} onClick={() => handleModelChange(m.value)}
+                    className={`text-left px-4 py-3 rounded-lg border text-sm transition-all ${
+                      model === m.value ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className={`font-medium ${model === m.value ? 'text-blue-700' : 'text-gray-700'}`}>{m.label}</span>
+                      <span className="text-xs text-gray-400">{m.desc}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Qualidade */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Qualidade</p>
+              <div className="flex gap-2">
+                {QUALITY_OPTIONS[model].map((q) => (
+                  <button key={q.value} onClick={() => setQuality(q.value)}
+                    className={`flex-1 py-2.5 rounded-lg border text-sm transition-all ${
+                      quality === q.value ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    <div className="font-medium">{q.label}</div>
+                    <div className="text-xs opacity-70">{q.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tamanho */}
+            <div className="mb-5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-2">Tamanho</p>
+              <div className="flex gap-2 flex-wrap">
+                {SIZE_OPTIONS[model].map((s) => (
+                  <button key={s.value} onClick={() => setSize(s.value)}
+                    className={`px-3 py-2 rounded-lg border text-xs transition-all ${
+                      size === s.value ? 'border-blue-600 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={() => setShowConfigModal(false)}
+              className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-all">
+              Confirmar
+            </button>
           </div>
         </div>
       )}
@@ -221,10 +321,16 @@ export default function Generator() {
           </div>
           <span className="font-semibold text-gray-900 text-sm tracking-tight">VCB Studio</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button onClick={() => setShowPromptModal(true)}
             className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-all">
             Editar prompt
+          </button>
+          <button onClick={() => setShowConfigModal(true)}
+            className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-all flex items-center gap-1.5">
+            <span>{MODEL_OPTIONS.find(m => m.value === model)?.label}</span>
+            <span className="text-gray-300">·</span>
+            <span className="text-green-600 font-medium">{currentCost}</span>
           </button>
           <button onClick={() => setShowApiModal(true)}
             className={`text-xs px-3 py-1.5 border rounded-lg transition-all flex items-center gap-1.5 ${
@@ -239,9 +345,7 @@ export default function Generator() {
       {isLoaded && !hasKey && (
         <div className="bg-amber-50 border-b border-amber-100 px-8 py-3 flex items-center justify-between">
           <p className="text-sm text-amber-700">Configure sua chave OpenAI para começar.</p>
-          <button onClick={() => setShowApiModal(true)} className="text-xs font-medium text-amber-700 underline underline-offset-2">
-            Configurar agora
-          </button>
+          <button onClick={() => setShowApiModal(true)} className="text-xs font-medium text-amber-700 underline underline-offset-2">Configurar agora</button>
         </div>
       )}
 
@@ -265,12 +369,10 @@ export default function Generator() {
 
           <button onClick={handleGenerate} disabled={loading || !characterDescription.trim() || !hasKey}
             className="w-full bg-blue-600 text-white rounded-lg py-3 text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-            {loading ? 'Gerando...' : !hasKey ? 'Configure a chave primeiro' : 'Gerar personagem'}
+            {loading ? 'Gerando...' : !hasKey ? 'Configure a chave primeiro' : `Gerar · ${currentCost}`}
           </button>
 
-          {error && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">{error}</div>
-          )}
+          {error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">{error}</div>}
         </div>
 
         {/* Preview */}
@@ -281,36 +383,27 @@ export default function Generator() {
               {loading && (
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-6 h-6 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin" />
-                  <p className="text-sm text-gray-400">Gerando com GPT-4o...</p>
+                  <p className="text-sm text-gray-400">Gerando com {MODEL_OPTIONS.find(m => m.value === model)?.label}...</p>
                 </div>
               )}
               {!loading && current?.imageUrl && (
-                <img src={current.imageUrl} alt={current.characterDescription}
-                  className="max-h-[460px] max-w-full object-contain rounded-lg" />
+                <img src={current.imageUrl} alt={current.characterDescription} className="max-h-[460px] max-w-full object-contain rounded-lg" />
               )}
               {!loading && !current && (
                 <div className="text-center">
                   <div className="w-12 h-12 rounded-xl bg-gray-200 mx-auto mb-3 flex items-center justify-center">
                     <span className="text-gray-400 text-lg">✦</span>
                   </div>
-                  <p className="text-sm text-gray-400">
-                    {hasKey ? 'Descreva o personagem e clique em gerar' : 'Configure sua chave OpenAI para começar'}
-                  </p>
+                  <p className="text-sm text-gray-400">{hasKey ? 'Descreva o personagem e clique em gerar' : 'Configure sua chave OpenAI para começar'}</p>
                 </div>
               )}
             </div>
-
             {current && (
               <div className="flex items-center justify-between mt-3">
                 <p className="text-xs text-gray-400 truncate max-w-sm">{current.characterDescription}</p>
                 <div className="flex gap-2">
-                  <button onClick={handleDownload}
-                    className="text-xs px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:border-gray-400 transition-all">
-                    Download PNG
-                  </button>
-                  <span className="text-xs px-4 py-2 border border-blue-100 rounded-lg text-blue-500 bg-blue-50">
-                    Vetorizar no Figma →
-                  </span>
+                  <button onClick={handleDownload} className="text-xs px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:border-gray-400 transition-all">Download PNG</button>
+                  <span className="text-xs px-4 py-2 border border-blue-100 rounded-lg text-blue-500 bg-blue-50">Vetorizar no Figma →</span>
                 </div>
               </div>
             )}
@@ -322,8 +415,7 @@ export default function Generator() {
               <div className="grid grid-cols-6 gap-2">
                 {history.map((item) => (
                   <button key={item.id} onClick={() => setCurrent(item)}
-                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                      current?.id === item.id ? 'border-blue-600' : 'border-transparent hover:border-gray-200'}`}>
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-all ${current?.id === item.id ? 'border-blue-600' : 'border-transparent hover:border-gray-200'}`}>
                     <img src={item.imageUrl} alt={item.characterDescription} className="w-full h-full object-cover" />
                   </button>
                 ))}
