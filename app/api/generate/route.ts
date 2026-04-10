@@ -1,37 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { buildPrompt } from '@/lib/styles'
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { characterDescription, styleId, referenceImages } = body
+    const { prompt, characterDescription } = body
 
-    // Aceita chave via header (sessionStorage do browser) ou env var
     const apiKey = req.headers.get('x-openai-key') || process.env.OPENAI_API_KEY
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API key não configurada. Acesse Configurações para inserir sua chave OpenAI.' },
+        { error: 'API key não configurada. Clique em "Configurar API" para inserir sua chave OpenAI.' },
         { status: 401 }
       )
     }
 
-    if (!characterDescription || !styleId) {
-      return NextResponse.json(
-        { error: 'characterDescription e styleId são obrigatórios' },
-        { status: 400 }
-      )
+    if (!prompt) {
+      return NextResponse.json({ error: 'Prompt é obrigatório' }, { status: 400 })
     }
 
     const openai = new OpenAI({ apiKey })
-    const prompt = buildPrompt(styleId, characterDescription)
 
     const response = await openai.images.generate({
       model: 'gpt-image-1',
-      prompt: referenceImages?.length
-        ? `${prompt} - Follow exactly the style shown in the reference images provided.`
-        : prompt,
+      prompt,
       n: 1,
       size: '1024x1024',
       quality: 'high',
@@ -49,7 +41,6 @@ export async function POST(req: NextRequest) {
       id: crypto.randomUUID(),
       imageUrl: imageUrl || `data:image/png;base64,${imageB64}`,
       prompt,
-      styleId,
       characterDescription,
       createdAt: new Date().toISOString(),
     })
